@@ -13,6 +13,8 @@ const CHUNK_SIZE = 64;
 const VertexList = new Float32Array(4 * CHUNK_TX_SIZE);
 const IndexList = new Uint32Array(6 * CHUNK_QUAD_COUNT);
 
+const HeightArray = new Float16Array(CHUNK_TX_SIZE);
+
 let vertexBuffer;
 let indexBuffer;
 
@@ -24,14 +26,22 @@ const VertexDescriptor = {
     ]
 }
 
+let depthTexture;
+
 let terrainPipeline;
 let terrainDescriptor;
+
 let sceneBuffer;
 let sceneLayout;
 let sceneBindGroup;
+
+let heightTexture;
+let terrainTextureLayout;
+let terrainTextureBindGroup;
+
 canvas.width = window.innerWidth;
 canvas.height = window.innerHeight;
-let camera = new Camera(canvas.clientWidth / canvas.clientHeight);
+let camera = new Camera(canvas.width / canvas.height);
 camera.lookTo = [0, -1, -1];
 camera.position = [32, 32, 80];
 camera.updateLookAt();
@@ -41,7 +51,7 @@ async function setupTerrainPipeline() {
     let renderModule = device.createShaderModule({code});
     terrainPipeline = device.createRenderPipeline({
         layout: device.createPipelineLayout({
-            bindGroupLayouts: [sceneLayout]
+            bindGroupLayouts: [sceneLayout, terrainTextureLayout]
         }),
         vertex: {
             buffers: [VertexDescriptor],
@@ -54,13 +64,24 @@ async function setupTerrainPipeline() {
         primitive: {
             cullMode: "back"
         },
+        depthStencil: {
+            depthWriteEnabled: true,
+            depthCompare: "less",
+            format: "depth24plus"
+        }
     });
     terrainDescriptor = {
         colorAttachments: [{
             clearValue: [0, 0, 0, 1],
             loadOp: "clear",
             storeOp: "store"
-        }]
+        }],
+        depthStencilAttachment: {
+            view: depthTexture.createView(),
+            depthClearValue: 1.0,
+            depthLoadOp: "clear",
+            depthStoreOp: "store"
+        }
     };
 }
 
@@ -79,7 +100,7 @@ function createTerrainMesh() {
         for (let x = 0; x < CHUNK_QUAD_DIM; x++) {
             let pos = y * CHUNK_QUAD_DIM + x;
             let offset = pos * 6;
-            IndexList.set([pos, pos + 1, pos + CHUNK_TX_DIM, pos + 1, pos + CHUNK_TX_DIM + 1, pos + CHUNK_TX_DIM], offset);
+            IndexList.set([pos, pos + CHUNK_TX_DIM, pos + 1, pos + 1, pos + CHUNK_TX_DIM, pos + CHUNK_TX_DIM + 1], offset);
         }
     }
 }
@@ -89,6 +110,16 @@ async function init() {
         return;
     }
     createTerrainMesh();
+    for (let i = 400; i < 500; i++) {
+        for (let j = 300; j < 350; j++) {
+            HeightArray[i * 512 + j] = 2.0;
+        }
+    }
+    for (let i = 460; i < 500; i++) {
+        for (let j = 100; j < 150; j++) {
+            HeightArray[i * 512 + j] = -2.0;
+        }
+    }
     sceneLayout = device.createBindGroupLayout({
         entries: [
             {
@@ -97,6 +128,20 @@ async function init() {
                 buffer: {type: "uniform"}
             }
         ]
+    });
+    terrainTextureLayout = device.createBindGroupLayout({
+        entries: [
+            {
+                binding: 0,
+                visibility: GPUShaderStage.VERTEX,
+                texture: { sampleType: "float" }
+            }
+        ]
+    });
+    depthTexture = device.createTexture({
+        size: [canvas.width, canvas.height],
+        format: "depth24plus",
+        usage: GPUTextureUsage.RENDER_ATTACHMENT
     });
     await setupTerrainPipeline();
     sceneBuffer = device.createBuffer({
@@ -122,6 +167,19 @@ async function init() {
         usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST
     });
     device.queue.writeBuffer(indexBuffer, 0, IndexList);
+    heightTexture = device.createTexture({
+        dimension: "2d",
+        format: "r16float",
+        size: [512, 512],
+        usage: GPUTextureUsage.COPY_DST | GPUTextureUsage.TEXTURE_BINDING
+    });
+    device.queue.writeTexture({texture: heightTexture}, HeightArray, {bytesPerRow: 1024}, [512, 512]);
+    terrainTextureBindGroup = device.createBindGroup({
+        layout: terrainTextureLayout,
+        entries: [
+            {binding: 0, resource: heightTexture.createView()}
+        ]
+    });
     requestAnimationFrame(main);
 }
 
@@ -133,6 +191,7 @@ async function main(currentTime) {
     terrainPass.setVertexBuffer(0, vertexBuffer);
     terrainPass.setIndexBuffer(indexBuffer, "uint32");
     terrainPass.setBindGroup(0, sceneBindGroup);
+    terrainPass.setBindGroup(1, terrainTextureBindGroup);
     terrainPass.drawIndexed(CHUNK_QUAD_COUNT * 6);
     terrainPass.end();
     device.queue.submit([encoder.finish()]);
