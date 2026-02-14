@@ -1,5 +1,6 @@
 import { setupGPUDevice, loadWGSLShader, presentationFormat, context, device } from "./gpuManager.js";
-import { Camera } from "./camera.js";
+import { mainCamera } from "./camera.js";
+import {} from "./inputManager.js";
 
 const canvas = document.getElementById("canvas");
 
@@ -41,10 +42,8 @@ let terrainTextureBindGroup;
 
 canvas.width = window.innerWidth;
 canvas.height = window.innerHeight;
-let camera = new Camera(canvas.width / canvas.height);
-camera.lookTo = [0, -1, -1];
-camera.position = [32, 32, 80];
-camera.updateLookAt();
+mainCamera.setAspectRatio(canvas.width / canvas.height);
+mainCamera.updateLookAt();
 
 async function setupTerrainPipeline() {
     let code = await loadWGSLShader("terrain.wgsl");
@@ -148,7 +147,7 @@ async function init() {
         size: 64,
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
     });
-    device.queue.writeBuffer(sceneBuffer, 0, camera.viewProjectionMatrix);
+    device.queue.writeBuffer(sceneBuffer, 0, mainCamera.viewProjectionMatrix);
     sceneBindGroup = device.createBindGroup({
         layout: sceneLayout,
         entries: [
@@ -183,7 +182,11 @@ async function init() {
     requestAnimationFrame(main);
 }
 
+console.log(mainCamera);
+
 async function main(currentTime) {
+    mainCamera.updateLookAt();
+    device.queue.writeBuffer(sceneBuffer, 0, mainCamera.viewProjectionMatrix);
     terrainDescriptor.colorAttachments[0].view = context.getCurrentTexture().createView();
     const encoder = device.createCommandEncoder();
     const terrainPass = encoder.beginRenderPass(terrainDescriptor);
