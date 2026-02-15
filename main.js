@@ -1,6 +1,7 @@
 import { setupGPUDevice, loadWGSLShader, presentationFormat, context, device } from "./gpuManager.js";
 import { mainCamera } from "./camera.js";
 import {} from "./inputManager.js";
+const { vec3 } = wgpuMatrix;
 
 const canvas = document.getElementById("canvas");
 
@@ -15,6 +16,7 @@ const VertexList = new Float32Array(4 * CHUNK_TX_SIZE);
 const IndexList = new Uint32Array(6 * CHUNK_QUAD_COUNT);
 
 const HeightArray = new Float16Array(CHUNK_TX_SIZE);
+const NormalArray = new Int8Array(CHUNK_TX_SIZE * 2);
 
 let vertexBuffer;
 let indexBuffer;
@@ -37,6 +39,7 @@ let sceneLayout;
 let sceneBindGroup;
 
 let heightTexture;
+let normalTexture;
 let terrainTextureLayout;
 let terrainTextureBindGroup;
 
@@ -104,6 +107,24 @@ function createTerrainMesh() {
     }
 }
 
+function calculateTerrainNormals() {
+    let xzDist = CHUNK_SIZE / CHUNK_QUAD_DIM * -2;
+    for (let y = 1; y < CHUNK_TX_DIM - 1; y++) {
+        for (let x = 1; x < CHUNK_TX_DIM - 1; x++) {
+            let idx = x + y * CHUNK_TX_DIM;
+            let v1y = HeightArray[idx + 1] - HeightArray[idx - 1];
+            let v1 = [xzDist, v1y, 0];
+            let v2y = HeightArray[idx + CHUNK_TX_DIM] - HeightArray[idx - CHUNK_TX_DIM];
+            let v2 = [0, v2y, xzDist];
+            let normal = vec3.normalize(vec3.cross(v2, v1));
+            let xpart = Math.floor(normal[0] * 127);
+            let zpart = Math.floor(normal[2] * 127);
+            NormalArray[idx * 2] = xpart;
+            NormalArray[idx * 2 + 1] = zpart;
+        }
+    }
+}
+
 async function init() {
     if (!await setupGPUDevice(canvas)) {
         return;
@@ -116,9 +137,10 @@ async function init() {
     }
     for (let i = 460; i < 500; i++) {
         for (let j = 100; j < 150; j++) {
-            HeightArray[i * 512 + j] = -2.0;
+            HeightArray[i * 512 + j] = -6.0 * ((j - 150) / -50);
         }
     }
+    calculateTerrainNormals();
     sceneLayout = device.createBindGroupLayout({
         entries: [
             {
@@ -132,6 +154,10 @@ async function init() {
         entries: [
             {
                 binding: 0,
+                visibility: GPUShaderStage.VERTEX,
+                texture: { sampleType: "float" }
+            }, {
+                binding: 1,
                 visibility: GPUShaderStage.VERTEX,
                 texture: { sampleType: "float" }
             }
@@ -173,16 +199,22 @@ async function init() {
         usage: GPUTextureUsage.COPY_DST | GPUTextureUsage.TEXTURE_BINDING
     });
     device.queue.writeTexture({texture: heightTexture}, HeightArray, {bytesPerRow: 1024}, [512, 512]);
+    normalTexture = device.createTexture({
+        dimension: "2d",
+        format: "rg8snorm",
+        size: [512, 512],
+        usage: GPUTextureUsage.COPY_DST | GPUTextureUsage.TEXTURE_BINDING
+    });
+    device.queue.writeTexture({texture: normalTexture}, NormalArray, {bytesPerRow: 1024}, [512, 512]);
     terrainTextureBindGroup = device.createBindGroup({
         layout: terrainTextureLayout,
         entries: [
-            {binding: 0, resource: heightTexture.createView()}
+            {binding: 0, resource: heightTexture.createView()},
+            {binding: 1, resource: normalTexture.createView()}
         ]
     });
     requestAnimationFrame(main);
 }
-
-console.log(mainCamera);
 
 async function main(currentTime) {
     mainCamera.updateLookAt();

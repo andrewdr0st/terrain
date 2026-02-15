@@ -11,7 +11,7 @@ let inputMode = 0;
 
 let panSensitivity = 0.08;
 let zoomSensitivity = 0.08;
-let spinSensitivity = 0.003;
+let spinSensitivity = 0.002;
 
 document.addEventListener("contextmenu", (e) => {
     e.preventDefault();
@@ -41,7 +41,7 @@ document.addEventListener("mousemove", (e) => {
     if (middlePressed || (leftPressed && inputMode == 0)) {
         mainCamera.pan(-e.movementX * panSensitivity, e.movementY * panSensitivity);
     } else if (rightPressed && inputMode == 0) {
-        mainCamera.spin(e.movementX * spinSensitivity, e.movementY * spinSensitivity);
+        mainCamera.spin(-e.movementX * spinSensitivity, e.movementY * spinSensitivity);
     }
 });
 
