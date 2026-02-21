@@ -1,22 +1,11 @@
 import { setupGPUDevice, loadWGSLShader, presentationFormat, context, device } from "./gpuManager.js";
 import { mainCamera } from "./camera.js";
+import { Chunk, createTerrainMesh, chunkVertexList, chunkIndexList } from "./chunk.js";
 import {} from "./inputManager.js";
-const { vec3 } = wgpuMatrix;
 
 const canvas = document.getElementById("canvas");
 
 const VERTEX_SIZE = 16;
-const CHUNK_TX_DIM = 512;
-const CHUNK_TX_SIZE = CHUNK_TX_DIM * CHUNK_TX_DIM;
-const CHUNK_QUAD_DIM = CHUNK_TX_DIM - 1;
-const CHUNK_QUAD_COUNT = CHUNK_QUAD_DIM * CHUNK_QUAD_DIM;
-const CHUNK_SIZE = 64;
-
-const VertexList = new Float32Array(4 * CHUNK_TX_SIZE);
-const IndexList = new Uint32Array(6 * CHUNK_QUAD_COUNT);
-
-const HeightArray = new Float16Array(CHUNK_TX_SIZE);
-const NormalArray = new Int8Array(CHUNK_TX_SIZE * 2);
 
 let vertexBuffer;
 let indexBuffer;
@@ -42,6 +31,8 @@ let heightTexture;
 let normalTexture;
 let terrainTextureLayout;
 let terrainTextureBindGroup;
+
+let chunk;
 
 canvas.width = window.innerWidth;
 canvas.height = window.innerHeight;
@@ -87,60 +78,27 @@ async function setupTerrainPipeline() {
     };
 }
 
-function createTerrainMesh() {
-    for (let y = 0; y < CHUNK_TX_DIM; y++) {
-        for (let x = 0; x < CHUNK_TX_DIM; x++) {
-            let offset = (y * CHUNK_TX_DIM + x) * 4;
-            let u = x / CHUNK_QUAD_DIM;
-            let v = y / CHUNK_QUAD_DIM;
-            let xp = u * CHUNK_SIZE;
-            let yp = v * CHUNK_SIZE;
-            VertexList.set([xp, yp, u, v], offset);
-        }
-    }
-    for (let y = 0; y < CHUNK_QUAD_DIM; y++) {
-        for (let x = 0; x < CHUNK_QUAD_DIM; x++) {
-            let pos = y * CHUNK_QUAD_DIM + x;
-            let offset = pos * 6;
-            IndexList.set([pos, pos + CHUNK_TX_DIM, pos + 1, pos + 1, pos + CHUNK_TX_DIM, pos + CHUNK_TX_DIM + 1], offset);
-        }
-    }
-}
-
-function calculateTerrainNormals() {
-    let xzDist = CHUNK_SIZE / CHUNK_QUAD_DIM * -2;
-    for (let y = 1; y < CHUNK_TX_DIM - 1; y++) {
-        for (let x = 1; x < CHUNK_TX_DIM - 1; x++) {
-            let idx = x + y * CHUNK_TX_DIM;
-            let v1y = HeightArray[idx + 1] - HeightArray[idx - 1];
-            let v1 = [xzDist, v1y, 0];
-            let v2y = HeightArray[idx + CHUNK_TX_DIM] - HeightArray[idx - CHUNK_TX_DIM];
-            let v2 = [0, v2y, xzDist];
-            let normal = vec3.normalize(vec3.cross(v2, v1));
-            let xpart = Math.floor(normal[0] * 127);
-            let zpart = Math.floor(normal[2] * 127);
-            NormalArray[idx * 2] = xpart;
-            NormalArray[idx * 2 + 1] = zpart;
-        }
-    }
-}
-
 async function init() {
     if (!await setupGPUDevice(canvas)) {
         return;
     }
     createTerrainMesh();
+    chunk = new Chunk();
+    chunk.heightArray[0] = 2.5;
+    chunk.heightArray[512 * 512 - 1] = 5.0;
     for (let i = 400; i < 500; i++) {
         for (let j = 300; j < 350; j++) {
-            HeightArray[i * 512 + j] = 2.0;
+            chunk.heightArray[i * 512 + j] = 2.0;
         }
+        chunk.heightArray[i * 512 - 1] = 1.5;
     }
-    for (let i = 460; i < 500; i++) {
+    for (let i = 460; i < 510; i++) {
         for (let j = 100; j < 150; j++) {
-            HeightArray[i * 512 + j] = -6.0 * ((j - 150) / -50);
+            chunk.heightArray[i * 512 + j] = -6.0 * ((j - 150) / -50);
         }
     }
-    calculateTerrainNormals();
+    chunk.calculateTerrainNormals();
+    chunk.buildBvhHeap();
     sceneLayout = device.createBindGroupLayout({
         entries: [
             {
@@ -182,30 +140,30 @@ async function init() {
     });
     vertexBuffer = device.createBuffer({
         label: "vertex buffer",
-        size: VERTEX_SIZE * CHUNK_TX_SIZE,
+        size: chunkVertexList.byteLength,
         usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST
     });
-    device.queue.writeBuffer(vertexBuffer, 0, VertexList);
+    device.queue.writeBuffer(vertexBuffer, 0, chunkVertexList);
     indexBuffer = device.createBuffer({
         label: "index buffer",
-        size: 24 * CHUNK_QUAD_COUNT,
+        size: chunkIndexList.byteLength,
         usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST
     });
-    device.queue.writeBuffer(indexBuffer, 0, IndexList);
+    device.queue.writeBuffer(indexBuffer, 0, chunkIndexList);
     heightTexture = device.createTexture({
         dimension: "2d",
         format: "r16float",
         size: [512, 512],
         usage: GPUTextureUsage.COPY_DST | GPUTextureUsage.TEXTURE_BINDING
     });
-    device.queue.writeTexture({texture: heightTexture}, HeightArray, {bytesPerRow: 1024}, [512, 512]);
+    device.queue.writeTexture({texture: heightTexture}, chunk.heightArray, {bytesPerRow: 1024}, [512, 512]);
     normalTexture = device.createTexture({
         dimension: "2d",
         format: "rg8snorm",
         size: [512, 512],
         usage: GPUTextureUsage.COPY_DST | GPUTextureUsage.TEXTURE_BINDING
     });
-    device.queue.writeTexture({texture: normalTexture}, NormalArray, {bytesPerRow: 1024}, [512, 512]);
+    device.queue.writeTexture({texture: normalTexture}, chunk.normalArray, {bytesPerRow: 1024}, [512, 512]);
     terrainTextureBindGroup = device.createBindGroup({
         layout: terrainTextureLayout,
         entries: [
@@ -227,7 +185,7 @@ async function main(currentTime) {
     terrainPass.setIndexBuffer(indexBuffer, "uint32");
     terrainPass.setBindGroup(0, sceneBindGroup);
     terrainPass.setBindGroup(1, terrainTextureBindGroup);
-    terrainPass.drawIndexed(CHUNK_QUAD_COUNT * 6);
+    terrainPass.drawIndexed(1566726);
     terrainPass.end();
     device.queue.submit([encoder.finish()]);
     requestAnimationFrame(main);

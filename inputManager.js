@@ -8,6 +8,7 @@ let middlePressed = false;
  * 1 = Sculpt
  */
 let inputMode = 0;
+let forceMove = false;
 
 let panSensitivity = 0.08;
 let zoomSensitivity = 0.08;
@@ -38,18 +39,34 @@ document.addEventListener("mouseup", (e) => {
 });
 
 document.addEventListener("mousemove", (e) => {
-    if (middlePressed || (leftPressed && inputMode == 0)) {
+    if (middlePressed || (leftPressed && (inputMode == 0 || forceMove))) {
         mainCamera.pan(-e.movementX * panSensitivity, e.movementY * panSensitivity);
-    } else if (rightPressed && inputMode == 0) {
+    } else if (rightPressed && (inputMode == 0 || forceMove)) {
         mainCamera.spin(-e.movementX * spinSensitivity, e.movementY * spinSensitivity);
     }
 });
 
 document.addEventListener("wheel", (e) => {
-    if (inputMode == 0) {
+    if (inputMode == 0 || forceMove) {
         mainCamera.zoom(-e.deltaY * zoomSensitivity);
     }
 });
 
+document.addEventListener("keydown", (e) => {
+    if (e.repeat) {
+        return;
+    }
+    if (e.key == "Shift") {
+        forceMove = true;
+    } else if (e.key == "1") {
+        inputMode = 0;
+    } else if (e.key == "2") {
+        inputMode = 1;
+    }
+});
 
-
+document.addEventListener("keyup", (e) => {
+    if (e.key == "Shift") {
+        forceMove = false;
+    }
+});

@@ -9,8 +9,8 @@ struct Vertex {
 
 struct VsOutput {
     @builtin(position) position: vec4f,
-    @location(0) uv: vec2f,
-    @location(1) h: f32,
+    @location(0) world_pos: vec3f,
+    @location(1) uv: vec2f,
     @location(2) normal: vec3f
 }
 
@@ -24,8 +24,9 @@ struct VsOutput {
     let normal_map_read: vec2f = textureLoad(normal_map, coords, 0).rg;
     let normal_y = sqrt(1 - normal_map_read.x * normal_map_read.x - normal_map_read.y * normal_map_read.y);
     let normal = vec3f(normal_map_read.x, normal_y, normal_map_read.y);
-    let pos = scene.viewProjection * vec4f(vert.pos.x, height, vert.pos.y, 1);
-    return VsOutput(pos, vert.uv, height, normal);
+    let world_pos = vec3f(vert.pos.x, height, vert.pos.y);
+    let pos = scene.viewProjection * vec4f(world_pos, 1);
+    return VsOutput(pos, world_pos, vert.uv, normal);
 }
 
 @fragment fn fs(fsIn: VsOutput) -> @location(0) vec4f {

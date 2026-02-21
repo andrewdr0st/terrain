@@ -19,6 +19,7 @@ export class Camera {
         this.viewMatrix;
         this.projectionMatrix;
         this.viewProjectionMatrix;
+        this.viewProjectionInverse;
         this.zNear = 0.1;
         this.zFar = 1000;
         this.setFov(60);
@@ -28,6 +29,7 @@ export class Camera {
     updateLookAt() {
         this.viewMatrix = mat4.lookAt(this.position, this.lookAt, this.up);
         this.viewProjectionMatrix = mat4.multiply(this.projectionMatrix, this.viewMatrix);
+        this.viewProjectionInverse = mat4.inverse(this.viewProjectionMatrix);
     }
 
     updatePosition() {
